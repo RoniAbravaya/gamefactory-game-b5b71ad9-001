@@ -1,122 +1,96 @@
 import 'package:flame/components.dart';
+import 'package:flame/geometry.dart';
 import 'package:flame/sprite.dart';
-import 'package:flame/time.dart';
-import 'package:testLast-platformer-01/game_objects/game_object.dart';
+import 'package:testLast-platformer-01/game_objects/obstacle.dart';
+import 'package:testLast-platformer-01/game_objects/collectable.dart';
 
 /// The player character in the platformer game.
-class Player extends SpriteAnimationComponent with HasGameRef<GameObjectsGame>, CollisionCallbacks {
-  /// The player's current horizontal velocity.
-  double xVelocity = 0;
+class Player extends SpriteAnimationComponent with HasHitboxes, Collidable {
+  static const double _playerSpeed = 200.0;
+  static const double _playerJumpForce = 500.0;
+  static const double _playerGravity = 1200.0;
 
-  /// The player's current vertical velocity.
-  double yVelocity = 0;
+  double _velocityY = 0.0;
+  double _health = 100.0;
+  bool _isInvulnerable = false;
+  double _invulnerabilityDuration = 2.0; // Seconds
 
-  /// The player's maximum horizontal speed.
-  static const double maxHorizontalSpeed = 200;
-
-  /// The player's maximum vertical speed.
-  static const double maxVerticalSpeed = 500;
-
-  /// The player's jump force.
-  static const double jumpForce = -500;
-
-  /// The player's health.
-  int health = 3;
-
-  /// The player's score.
-  int score = 0;
-
-  /// The player's animation states.
-  late SpriteAnimation idleAnimation, walkingAnimation, jumpingAnimation;
-
-  /// The current animation state.
-  SpriteAnimation currentAnimation = SpriteAnimation.empty();
-
-  /// The time since the last jump.
-  TimerComponent jumpTimer = TimerComponent(0.25, repeat: false);
-
-  /// Creates a new instance of the Player component.
-  Player(Vector2 position) : super(position: position, size: Vector2.all(32)) {
-    // Load the player's animations
-    idleAnimation = SpriteAnimation.fromFrameData(
-      gameRef.images.fromCache('player_idle.png'),
-      SpriteAnimationData.sequenced(
-        amount: 4,
-        stepTime: 0.2,
-        textureSize: Vector2.all(32),
-      ),
-    );
-
-    walkingAnimation = SpriteAnimation.fromFrameData(
-      gameRef.images.fromCache('player_walking.png'),
-      SpriteAnimationData.sequenced(
-        amount: 6,
-        stepTime: 0.1,
-        textureSize: Vector2.all(32),
-      ),
-    );
-
-    jumpingAnimation = SpriteAnimation.fromFrameData(
-      gameRef.images.fromCache('player_jumping.png'),
-      SpriteAnimationData.sequenced(
-        amount: 1,
-        stepTime: 1,
-        textureSize: Vector2.all(32),
-      ),
-    );
-
-    // Set the initial animation state
-    currentAnimation = idleAnimation;
+  /// Constructs a new [Player] instance.
+  Player(Vector2 position)
+      : super(
+          position: position,
+          size: Vector2.all(32.0),
+          animation: SpriteAnimation.fromFrameData(
+            Sprite('player.png'),
+            SpriteAnimationData.sequenced(
+              amount: 4,
+              stepTime: 0.15,
+              textureSize: Vector2.all(32.0),
+            ),
+          ),
+        ) {
+    addHitbox(HitboxRectangle());
   }
 
   @override
   void update(double dt) {
     super.update(dt);
 
-    // Update the player's velocity and position
-    xVelocity = (gameRef.keyboard.isPressed(LogicalKeyboardKey.arrowRight) ? maxHorizontalSpeed : 0) -
-        (gameRef.keyboard.isPressed(LogicalKeyboardKey.arrowLeft) ? maxHorizontalSpeed : 0);
-    yVelocity += 1500 * dt;
-    yVelocity = yVelocity.clamp(-maxVerticalSpeed, maxVerticalSpeed);
-    position.add(Vector2(xVelocity * dt, yVelocity * dt));
+    // Apply gravity
+    _velocityY += _playerGravity * dt;
+    position.y += _velocityY * dt;
 
-    // Update the player's animation state
-    if (yVelocity < 0) {
-      currentAnimation = jumpingAnimation;
-    } else if (xVelocity.abs() > 0) {
-      currentAnimation = walkingAnimation;
-    } else {
-      currentAnimation = idleAnimation;
-    }
-
-    // Update the jump timer
-    jumpTimer.update(dt);
-  }
-
-  @override
-  void render(Canvas canvas) {
-    // Render the player's current animation
-    currentAnimation.getSprite().render(canvas, position: position, size: size);
-  }
-
-  @override
-  void onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
-    // Handle player collisions
-    if (other is Obstacle) {
-      // Reduce player health on collision with an obstacle
-      health--;
-    } else if (other is Coin) {
-      // Increase player score on collision with a coin
-      score++;
-      other.removeFromParent();
+    // Handle invulnerability
+    if (_isInvulnerable) {
+      _invulnerabilityDuration -= dt;
+      if (_invulnerabilityDuration <= 0) {
+        _isInvulnerable = false;
+      }
     }
   }
 
-  /// Allows the player to jump if they are on the ground.
+  /// Moves the player to the right.
+  void moveRight() {
+    position.x += _playerSpeed * game.dt;
+  }
+
+  /// Moves the player to the left.
+  void moveLeft() {
+    position.x -= _playerSpeed * game.dt;
+  }
+
+  /// Makes the player jump.
   void jump() {
-    if (jumpTimer.isFinished) {
-      yVelocity = jumpForce;
-      jumpTimer.start();
+    if (_velocityY.abs() < 0.1) {
+      _velocityY = -_playerJumpForce;
     }
   }
+
+  /// Handles collision with an [Obstacle].
+  @override
+  void onCollision(Set<Vector2> intersectionPoints, Collidable other) {
+    if (other is Obstacle) {
+      _takeDamage(20);
+    }
+  }
+
+  /// Handles collision with a [Collectable].
+  @override
+  void onCollisionEnd(Collidable other) {
+    if (other is Collectable) {
+      other.collect();
+    }
+  }
+
+  /// Reduces the player's health by the specified amount.
+  void _takeDamage(double amount) {
+    if (!_isInvulnerable) {
+      _health -= amount;
+      _isInvulnerable = true;
+      _invulnerabilityDuration = 2.0;
+    }
+  }
+
+  /// Returns the player's current health.
+  double get health => _health;
 }
